@@ -21,7 +21,7 @@
 #
 # Args: --mode=worker --host=<service cluster ip> --port=5202
 #
-FROM debian:jessie
+FROM debian:buster
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
 MAINTAINER Girish Kalele <gkalele@google.com>

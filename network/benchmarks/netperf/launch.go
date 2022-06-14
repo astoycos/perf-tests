@@ -41,12 +41,13 @@ import (
 )
 
 const (
-	csvDataMarker    = "GENERATING CSV OUTPUT"
-	csvEndDataMarker = "END CSV DATA"
-	runUUID          = "latest"
-	orchestratorPort = 5202
-	iperf3Port       = 5201
-	netperfPort      = 12865
+	csvDataMarker      = "GENERATING CSV OUTPUT"
+	csvEndDataMarker   = "END CSV DATA"
+	runUUID            = "latest"
+	orchestratorPort   = 5202
+	iperf3Port         = 5201
+	netperfControlPort = 12865
+	netperfDataPort    = 12866
 )
 
 var (
@@ -57,6 +58,7 @@ var (
 	testNamespace  string
 	netperfImage   string
 	cleanupOnly    bool
+	testcases      string
 
 	everythingSelector metav1.ListOptions = metav1.ListOptions{}
 
@@ -77,6 +79,7 @@ func init() {
 		"Location of the kube configuration file ($HOME/.kube/config")
 	flag.BoolVar(&cleanupOnly, "cleanup", false,
 		"(boolean) Run the cleanup resources phase only (use this flag to clean up orphaned resources from a test run)")
+	flag.StringVar(&testcases, "testcases", "all", "Which testcases to run (iperf3 | netperf | nosctp | all)")
 }
 
 func setupClient() *kubernetes.Clientset {
@@ -206,10 +209,16 @@ func createServices(c *kubernetes.Clientset) bool {
 					TargetPort: intstr.FromInt(iperf3Port),
 				},
 				{
-					Name:       "netperf-w2-netperf",
+					Name:       "netperf-w2-netperf-control",
 					Protocol:   api.ProtocolTCP,
-					Port:       netperfPort,
-					TargetPort: intstr.FromInt(netperfPort),
+					Port:       netperfControlPort,
+					TargetPort: intstr.FromInt(netperfControlPort),
+				},
+				{
+					Name:       "netperf-w2-netperf-data",
+					Protocol:   api.ProtocolTCP,
+					Port:       netperfDataPort,
+					TargetPort: intstr.FromInt(netperfDataPort),
 				},
 			},
 			Type: api.ServiceTypeClusterIP,
@@ -245,8 +254,8 @@ func createRCs(c *kubernetes.Clientset) bool {
 							Name:            name,
 							Image:           netperfImage,
 							Ports:           []api.ContainerPort{{ContainerPort: orchestratorPort}},
-							Args:            []string{"--mode=orchestrator"},
-							ImagePullPolicy: "Always",
+							Args:            []string{"-mode=orchestrator", fmt.Sprintf("-testcases=%s", testcases)},
+							ImagePullPolicy: "IfNotPresent",
 						},
 					},
 					TerminationGracePeriodSeconds: new(int64),
@@ -273,6 +282,8 @@ func createRCs(c *kubernetes.Clientset) bool {
 			// Worker W1 is a client-only pod - no ports are exposed
 			portSpec = append(portSpec, api.ContainerPort{ContainerPort: iperf3Port, Protocol: api.ProtocolTCP})
 			portSpec = append(portSpec, api.ContainerPort{ContainerPort: iperf3Port, Protocol: api.ProtocolSCTP})
+			portSpec = append(portSpec, api.ContainerPort{ContainerPort: netperfControlPort, Protocol: api.ProtocolTCP})
+			portSpec = append(portSpec, api.ContainerPort{ContainerPort: netperfDataPort, Protocol: api.ProtocolTCP})
 		}
 
 		workerEnv := []api.EnvVar{
@@ -299,9 +310,9 @@ func createRCs(c *kubernetes.Clientset) bool {
 								Name:            name,
 								Image:           netperfImage,
 								Ports:           portSpec,
-								Args:            []string{"--mode=worker"},
+								Args:            []string{"-mode=worker", fmt.Sprintf("-testcases=%s", testcases)},
 								Env:             workerEnv,
-								ImagePullPolicy: "Always",
+								ImagePullPolicy: "IfNotPresent",
 							},
 						},
 						TerminationGracePeriodSeconds: new(int64),
@@ -422,10 +433,11 @@ func main() {
 	flag.Parse()
 	fmt.Println("Network Performance Test")
 	fmt.Println("Parameters :")
-	fmt.Println("Iterations      : ", iterations)
-	fmt.Println("Host Networking : ", hostnetworking)
-	fmt.Println("Test Namespace  : ", testNamespace)
-	fmt.Println("Docker image    : ", netperfImage)
+	fmt.Println("Iterations        : ", iterations)
+	fmt.Println("Host Networking   : ", hostnetworking)
+	fmt.Println("Test Namespace    : ", testNamespace)
+	fmt.Println("Docker image      : ", netperfImage)
+	fmt.Println("Test Cases to Run : ", testcases)
 	fmt.Println("------------------------------------------------------------")
 
 	var c *kubernetes.Clientset
